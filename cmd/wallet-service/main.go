@@ -7,10 +7,10 @@ import (
 	"wallet-service/internal/cache"
 	"wallet-service/internal/database"
 	"wallet-service/internal/migrations"
+	"wallet-service/internal/service"
 
 	"github.com/pkg/errors"
 	"wallet-service/internal/config"
-	"wallet-service/internal/http_service"
 )
 
 func main() {
@@ -35,7 +35,7 @@ func main() {
 		log.Fatal(errors.Wrap(err, "error in cache initiating"))
 	}
 
-	router := http_service.InitRouter(db, redisCache, cfg)
+	router := service.InitRouter(db, redisCache, cfg)
 
 	log.Println("service starting...")
 	err = http.ListenAndServe(":8080", router)
