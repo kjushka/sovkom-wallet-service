@@ -4,6 +4,15 @@ networks:
     driver: bridge
 
 services:
+  rate-predicts:
+    container_name: rate-predicts
+    image: imigaka/rate-predicts:latest
+    ports:
+      - "5000:5000"
+    networks:
+      - network
+    restart: on-failure
+
   node-service:
     depends_on:
       pgs:

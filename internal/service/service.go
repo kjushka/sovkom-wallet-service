@@ -256,8 +256,8 @@ func (s *HttpService) GetCurrentCurrencyRate(w http.ResponseWriter, r *http.Requ
 
 	defer exchangerResp.Body.Close()
 
-	var updatedCurrencyRates currency_helpers.CurrencyRatesResponse
-	err = json.NewDecoder(exchangerResp.Body).Decode(&updatedCurrencyRates)
+	updatedCurrencyRates := &currency_helpers.CurrencyRatesResponse{}
+	err = json.NewDecoder(exchangerResp.Body).Decode(updatedCurrencyRates)
 	if err != nil {
 		err = errors.Wrap(err, "internal error in read JSON data")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -366,8 +366,8 @@ func (s *HttpService) GetTimelineCurrencyRate(w http.ResponseWriter, r *http.Req
 
 	defer exchangerResp.Body.Close()
 
-	var timelineCurrencyRates currency_helpers.CurrencyTimelineRatesResponse
-	err = json.NewDecoder(exchangerResp.Body).Decode(&timelineCurrencyRates)
+	timelineCurrencyRates := &currency_helpers.CurrencyTimelineRatesResponse{}
+	err = json.NewDecoder(exchangerResp.Body).Decode(timelineCurrencyRates)
 	if err != nil {
 		err = errors.Wrap(err, "internal error in read JSON data")
 		http.Error(w, err.Error(), http.StatusInternalServerError)

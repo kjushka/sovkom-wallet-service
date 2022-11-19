@@ -57,4 +57,5 @@ jobs:
             cd /var/www/sovkom-hac-backend/sovkom-wallet-service
             git pull origin main
             git status
+            make down
             make run

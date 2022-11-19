@@ -30,7 +30,7 @@ func (ct *CustomTime) UnmarshalJSON(b []byte) (err error) {
 	return
 }
 
-func (ct CustomTime) MarshalJSON() ([]byte, error) {
+func (ct *CustomTime) MarshalJSON() ([]byte, error) {
 	if ct.Time.UnixNano() == nilTime {
 		return []byte("null"), nil
 	}
