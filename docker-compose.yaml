@@ -9,7 +9,7 @@ services:
       pgs:
         condition: service_healthy
     container_name: node-service
-    image: keltdeep2:node_hackathon
+    image: keltdeep2/node_hackathon
     command: sh -c "npm i && npm run build && npm run start:prod"
     ports:
       - "6005:6005"
