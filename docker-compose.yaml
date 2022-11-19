@@ -3,11 +3,23 @@ networks:
   network:
     driver: bridge
 
-volumes:
-  test:
-    name: test
-
 services:
+  node-service:
+    depends_on:
+      pgs:
+        condition: service_healthy
+    container_name: node-service
+    image: keltdeep2:node_hackathon
+    command: sh -c "npm i && npm run build && npm run start:prod"
+    ports:
+      - "6005:6005"
+    networks:
+      - network
+    volumes:
+      - ../hackathon:/usr/app
+      - /usr/app/node_modules
+    restart: unless-stopped
+
   wallet-service:
     build:
       dockerfile: Dockerfile
