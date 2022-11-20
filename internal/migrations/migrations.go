@@ -25,7 +25,7 @@ func Migrate(db *sqlx.DB, cfg *config.Config) error {
 		return errors.Wrap(err, "error in create migration client")
 	}
 	err = m.Up()
-	if err != nil {
+	if err != nil && err != migrate.ErrNoChange {
 		downErr := m.Down()
 		if downErr != nil {
 			return errors.Wrap(err, "error in up and down migration")

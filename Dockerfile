@@ -1,7 +1,6 @@
-FROM golang:1.19-alpine
+FROM golang:1.18-alpine
 WORKDIR /wallet-service
 COPY / ./
 RUN go mod download
-RUN go build -o ./bin/wallet-service ./cmd/wallet-service
-
-CMD [ "./bin/wallet-service" ]
+RUN go build -o ./wallet-service ./cmd/wallet-service
+ENTRYPOINT [ "./wallet-service" ]

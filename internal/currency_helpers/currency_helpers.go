@@ -66,11 +66,12 @@ type CurrencyTimelineRates struct {
 }
 
 type CurrencyTimelineRate struct {
-	Base      CurrencyCode           `json:"base"`
-	Second    CurrencyCode           `json:"second"`
-	Rates     map[CustomTime]float64 `json:"rates"`
-	StartDate CustomTime             `json:"startDate"`
-	EndDate   CustomTime             `json:"endDate"`
+	Base        CurrencyCode           `json:"base"`
+	Second      CurrencyCode           `json:"second"`
+	Rates       map[CustomTime]float64 `json:"rates"`
+	Predictions map[CustomTime]float64 `json:"predictions,omitempty"`
+	StartDate   CustomTime             `json:"startDate"`
+	EndDate     CustomTime             `json:"endDate"`
 }
 
 func (cr CurrencyTimelineRates) ToResultTimelineRates(currencyCode CurrencyCode) *CurrencyTimelineRate {

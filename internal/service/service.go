@@ -1,10 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jmoiron/sqlx"
+	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"wallet-service/internal/config"
 	"wallet-service/internal/currency_helpers"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 )
 
@@ -336,19 +338,19 @@ func (s *HttpService) GetTimelineCurrencyRate(w http.ResponseWriter, r *http.Req
 	cbrCtx, cancel := context.WithTimeout(ctx, s.cfg.ExchangerAPITimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(
-		cbrCtx,
-		http.MethodGet,
-		fmt.Sprintf(
-			"%s/timeseries?start_date=%s&end_date=%s&base=%s&symbols=%s&places=4",
-			s.cfg.ExchangerAPIURL,
-			startDate.Format(currency_helpers.CustomTimeLayout),
-			endDate.Format(currency_helpers.CustomTimeLayout),
-			currencyCodeBase,
-			currencyCodeSecond,
-		),
-		nil,
+	todayY, todayM, todayD := time.Now().Year(), time.Now().Month(), time.Now().Day()
+	today := time.Date(todayY, todayM, todayD, 0, 0, 0, 0, time.UTC)
+	// какая-то странная бага, не работает today
+	url := fmt.Sprintf(
+		"%s/timeseries?start_date=%s&end_date=%s&base=%s&symbols=%s&places=4",
+		s.cfg.ExchangerAPIURL,
+		today.AddDate(0, 0, -1).Format(currency_helpers.CustomTimeLayout),
+		today.AddDate(-1, 0, -1).Format(currency_helpers.CustomTimeLayout),
+		currencyCodeBase,
+		currencyCodeSecond,
 	)
+	log.Println(url)
+	req, err := http.NewRequestWithContext(cbrCtx, http.MethodGet, url, nil)
 	if err != nil {
 		err = errors.Wrap(err, "error in prepare request")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -380,8 +382,76 @@ func (s *HttpService) GetTimelineCurrencyRate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	currencyRate := timelineCurrencyRates.ToResultTimelineRates(currencyCodeSecond)
+
+	predictorCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	dataForPredictions, err := json.Marshal(currencyRate.Rates)
+	log.Println(string(dataForPredictions), currencyRate.Rates, timelineCurrencyRates)
+	if err != nil {
+		err = errors.Wrap(err, "error in prepare data for predictions")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	req, err = http.NewRequestWithContext(
+		predictorCtx,
+		http.MethodPost,
+		fmt.Sprintf(
+			"https://stbuddy.xyz/predict",
+		),
+		bytes.NewBuffer(dataForPredictions),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	if err != nil {
+		err = errors.Wrap(err, "error in prepare request")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	predictorResp, err := client.Do(req)
+	if err != nil {
+		err = errors.Wrap(err, "error in get predictions")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	defer predictorResp.Body.Close()
+	var predictedRates []float64
+	b, _ := io.ReadAll(predictorResp.Body)
+	log.Println(string(b))
+	err = json.NewDecoder(bytes.NewBuffer(b)).Decode(&predictedRates)
+	if err != nil {
+		err = errors.Wrap(err, "error in reading predictor response")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	predictions := make(map[currency_helpers.CustomTime]float64, len(predictedRates))
+	t := time.Now()
+	for _, rate := range predictedRates {
+		predictions[currency_helpers.CustomTime{Time: t}] = rate
+		t.AddDate(0, 0, 1)
+	}
+	currencyRate.Predictions = predictions
+
+	timelineRates := make(map[currency_helpers.CustomTime]float64)
+	for t, rate := range currencyRate.Rates {
+		if t.Equal(startDate) || t.After(endDate) && t.Before(endDate) {
+			timelineRates[t] = rate
+		}
+	}
+	result := currency_helpers.CurrencyTimelineRate{
+		Base:        currencyRate.Base,
+		Second:      currencyRate.Second,
+		Rates:       timelineRates,
+		Predictions: predictions,
+		StartDate:   currency_helpers.CustomTime{Time: startDate},
+		EndDate:     currency_helpers.CustomTime{Time: endDate},
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(w).Encode(timelineCurrencyRates.ToResultTimelineRates(currencyCodeSecond))
+	err = json.NewEncoder(w).Encode(result)
 	if err != nil {
 		err = errors.Wrap(err, "error in prepare response date")
 		http.Error(w, err.Error(), http.StatusInternalServerError)

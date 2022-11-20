@@ -4,34 +4,24 @@ networks:
     driver: bridge
 
 services:
-  rate-predicts:
-    container_name: rate-predicts
-    image: imigaka/rate-predicts:latest
-    ports:
-      - "5000:5000"
-    networks:
-      - network
-    restart: on-failure
-
-  node-service:
-    depends_on:
-      pgs:
-        condition: service_healthy
-    container_name: node-service
-    image: keltdeep2/node_hackathon:latest
-    command: sh -c "npm i && npm run build && npm run start:prod"
-    ports:
-      - "6005:6005"
-    networks:
-      - network
-    volumes:
-      - ../hackathon:/usr/app
-      - /usr/app/node_modules
-    restart: unless-stopped
+#  node-service:
+#    depends_on:
+#      pgs:
+#        condition: service_healthy
+#    container_name: node-service
+#    image: keltdeep2/node_hackathon:latest
+#    command: sh -c "npm i && npm run build && npm run start:prod"
+#    ports:
+#      - "6005:6005"
+#    networks:
+#      - network
+#    volumes:
+#      - ../hackathon:/usr/app
+#      - /usr/app/node_modules
+#    restart: unless-stopped
 
   wallet-service:
-    build:
-      dockerfile: Dockerfile
+    image: imigaka/wallet-service:latest
     depends_on:
       redis:
         condition: service_healthy
