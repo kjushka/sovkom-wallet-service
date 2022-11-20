@@ -4,21 +4,21 @@ networks:
     driver: bridge
 
 services:
-#  node-service:
-#    depends_on:
-#      pgs:
-#        condition: service_healthy
-#    container_name: node-service
-#    image: keltdeep2/node_hackathon:latest
-#    command: sh -c "npm i && npm run build && npm run start:prod"
-#    ports:
-#      - "6005:6005"
-#    networks:
-#      - network
-#    volumes:
-#      - ../hackathon:/usr/app
-#      - /usr/app/node_modules
-#    restart: unless-stopped
+  node-service:
+    depends_on:
+      pgs:
+        condition: service_healthy
+    container_name: node-service
+    image: keltdeep2/node_hackathon:latest
+    command: sh -c "npm i && npm run build && npm run start:prod"
+    ports:
+      - "6005:6005"
+    networks:
+      - network
+    volumes:
+      - ../hackathon:/usr/app
+      - /usr/app/node_modules
+    restart: unless-stopped
 
   wallet-service:
     image: imigaka/wallet-service:latest
