@@ -230,13 +230,15 @@ func (s *HttpService) GetCurrentCurrencyRate(w http.ResponseWriter, r *http.Requ
 	cbrCtx, cancel := context.WithTimeout(ctx, s.cfg.ExchangerAPITimeout)
 	defer cancel()
 
+	todayY, todayM, todayD := time.Now().Year(), time.Now().Month(), time.Now().Day()
+	previousDay := time.Date(todayY, todayM, todayD-1, 0, 0, 0, 0, time.UTC)
 	req, err := http.NewRequestWithContext(
 		cbrCtx,
 		http.MethodGet,
 		fmt.Sprintf(
 			"%s/%s?base=%s&places=4",
 			s.cfg.ExchangerAPIURL,
-			time.Now().AddDate(0, 0, -1).Format("02.01.2006"),
+			previousDay.Format("02.01.2006"),
 			currencyCodeBase,
 		),
 		nil,
@@ -335,109 +337,128 @@ func (s *HttpService) GetTimelineCurrencyRate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	cbrCtx, cancel := context.WithTimeout(ctx, s.cfg.ExchangerAPITimeout)
+	cacheCtx, cancel := context.WithTimeout(ctx, s.cfg.CacheTimeout)
 	defer cancel()
+	currencyRate, err := s.redisCache.GetTimestampRate(ctx, currencyCodeBase, currencyCodeSecond)
+	if err != nil || currencyRate == nil {
+		if err != nil {
+			err = errors.Wrap(err, "error in get timestamp rate from cache")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-	todayY, todayM, todayD := time.Now().Year(), time.Now().Month(), time.Now().Day()
-	today := time.Date(todayY, todayM, todayD, 0, 0, 0, 0, time.UTC)
-	// какая-то странная бага, не работает today
-	url := fmt.Sprintf(
-		"%s/timeseries?start_date=%s&end_date=%s&base=%s&symbols=%s&places=4",
-		s.cfg.ExchangerAPIURL,
-		today.AddDate(0, 0, -1).Format(currency_helpers.CustomTimeLayout),
-		today.AddDate(-1, 0, -1).Format(currency_helpers.CustomTimeLayout),
-		currencyCodeBase,
-		currencyCodeSecond,
-	)
-	log.Println(url)
-	req, err := http.NewRequestWithContext(cbrCtx, http.MethodGet, url, nil)
-	if err != nil {
-		err = errors.Wrap(err, "error in prepare request")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		cbrCtx, cancel := context.WithTimeout(ctx, s.cfg.ExchangerAPITimeout)
+		defer cancel()
+
+		todayY, todayM, todayD := time.Now().Year(), time.Now().Month(), time.Now().Day()
+		previousDay := time.Date(todayY, todayM, todayD-1, 0, 0, 0, 0, time.UTC)
+		previousYear := time.Date(todayY-1, todayM, todayD, 0, 0, 0, 0, time.UTC)
+		// какая-то странная бага, не работает today
+		url := fmt.Sprintf(
+			"%s/timeseries?start_date=%s&end_date=%s&base=%s&symbols=%s&places=4",
+			s.cfg.ExchangerAPIURL,
+			previousYear.Format(currency_helpers.CustomTimeLayout),
+			previousDay.Format(currency_helpers.CustomTimeLayout),
+			currencyCodeBase,
+			currencyCodeSecond,
+		)
+
+		req, err := http.NewRequestWithContext(cbrCtx, http.MethodGet, url, nil)
+		if err != nil {
+			err = errors.Wrap(err, "error in prepare request")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		client := http.DefaultClient
+
+		exchangerResp, err := client.Do(req)
+		if err != nil {
+			err = errors.Wrap(err, "error in get new data")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		defer exchangerResp.Body.Close()
+
+		timelineCurrencyRates := &currency_helpers.CurrencyTimelineRatesResponse{}
+		err = json.NewDecoder(exchangerResp.Body).Decode(timelineCurrencyRates)
+		if err != nil {
+			err = errors.Wrap(err, "internal error in read JSON data")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if !timelineCurrencyRates.Success {
+			err = errors.New("unsuccessful getting new rates")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		currencyRate = timelineCurrencyRates.ToResultTimelineRates(currencyCodeSecond)
+
+		predictorCtx, cancel := context.WithTimeout(ctx, time.Minute*10)
+		defer cancel()
+
+		dataForPredictions, err := json.Marshal(currencyRate.Rates)
+		if err != nil {
+			err = errors.Wrap(err, "error in prepare data for predictions")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		req, err = http.NewRequestWithContext(
+			predictorCtx,
+			http.MethodPost,
+			fmt.Sprintf(
+				"https://stbuddy.xyz/predict",
+			),
+			bytes.NewBuffer(dataForPredictions),
+		)
+		req.Header.Set("Content-Type", "application/json")
+		if err != nil {
+			err = errors.Wrap(err, "error in prepare request")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		predictorResp, err := client.Do(req)
+		if err != nil {
+			err = errors.Wrap(err, "error in get predictions")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		defer predictorResp.Body.Close()
+		var predictedRates []float64
+		b, _ := io.ReadAll(predictorResp.Body)
+		err = json.NewDecoder(bytes.NewBuffer(b)).Decode(&predictedRates)
+		if err != nil {
+			err = errors.Wrap(err, "error in reading predictor response")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		predictions := make(map[currency_helpers.CustomTime]float64, len(predictedRates))
+
+		i := 0
+		for _, rate := range predictedRates {
+			t := time.Date(todayY, todayM, todayD+i, 0, 0, 0, 0, time.UTC)
+			i += 1
+			predictions[currency_helpers.CustomTime{Time: t}] = rate
+		}
+		currencyRate.Predictions = predictions
+
+		cacheCtx, cancel = context.WithTimeout(ctx, s.cfg.CacheTimeout)
+		defer cancel()
+		err = s.redisCache.SaveTimestampRate(cacheCtx, currencyRate)
+		if err != nil {
+			log.Printf("error in save timestamp rate: %s", err.Error())
+		}
 	}
-
-	client := http.DefaultClient
-
-	exchangerResp, err := client.Do(req)
-	if err != nil {
-		err = errors.Wrap(err, "error in get new data")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	defer exchangerResp.Body.Close()
-
-	timelineCurrencyRates := &currency_helpers.CurrencyTimelineRatesResponse{}
-	err = json.NewDecoder(exchangerResp.Body).Decode(timelineCurrencyRates)
-	if err != nil {
-		err = errors.Wrap(err, "internal error in read JSON data")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if !timelineCurrencyRates.Success {
-		err = errors.New("unsuccessful getting new rates")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	currencyRate := timelineCurrencyRates.ToResultTimelineRates(currencyCodeSecond)
-
-	predictorCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-
-	dataForPredictions, err := json.Marshal(currencyRate.Rates)
-	log.Println(string(dataForPredictions), currencyRate.Rates, timelineCurrencyRates)
-	if err != nil {
-		err = errors.Wrap(err, "error in prepare data for predictions")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	req, err = http.NewRequestWithContext(
-		predictorCtx,
-		http.MethodPost,
-		fmt.Sprintf(
-			"https://stbuddy.xyz/predict",
-		),
-		bytes.NewBuffer(dataForPredictions),
-	)
-	req.Header.Set("Content-Type", "application/json")
-	if err != nil {
-		err = errors.Wrap(err, "error in prepare request")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	predictorResp, err := client.Do(req)
-	if err != nil {
-		err = errors.Wrap(err, "error in get predictions")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	defer predictorResp.Body.Close()
-	var predictedRates []float64
-	b, _ := io.ReadAll(predictorResp.Body)
-	log.Println(string(b))
-	err = json.NewDecoder(bytes.NewBuffer(b)).Decode(&predictedRates)
-	if err != nil {
-		err = errors.Wrap(err, "error in reading predictor response")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	predictions := make(map[currency_helpers.CustomTime]float64, len(predictedRates))
-	t := time.Now()
-	for _, rate := range predictedRates {
-		predictions[currency_helpers.CustomTime{Time: t}] = rate
-		t.AddDate(0, 0, 1)
-	}
-	currencyRate.Predictions = predictions
 
 	timelineRates := make(map[currency_helpers.CustomTime]float64)
 	for t, rate := range currencyRate.Rates {
-		if t.Equal(startDate) || t.After(endDate) && t.Before(endDate) {
+		if t.Equal(startDate) || t.After(startDate) && t.Before(endDate) {
 			timelineRates[t] = rate
 		}
 	}
@@ -445,7 +466,7 @@ func (s *HttpService) GetTimelineCurrencyRate(w http.ResponseWriter, r *http.Req
 		Base:        currencyRate.Base,
 		Second:      currencyRate.Second,
 		Rates:       timelineRates,
-		Predictions: predictions,
+		Predictions: currencyRate.Predictions,
 		StartDate:   currency_helpers.CustomTime{Time: startDate},
 		EndDate:     currency_helpers.CustomTime{Time: endDate},
 	}

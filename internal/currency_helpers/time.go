@@ -23,7 +23,8 @@ func (ct *CustomTime) UnmarshalJSON(b []byte) (err error) {
 		return
 	}
 	ct.Time, err = time.Parse(CustomTimeLayout, s)
-	if err == nil {
+	if err != nil {
+		ct.Time, err = time.Parse(time.RFC3339, s)
 		return
 	}
 

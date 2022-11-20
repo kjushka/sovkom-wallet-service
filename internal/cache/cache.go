@@ -22,6 +22,13 @@ type Cache interface {
 		currencyCodeSecond currency_helpers.CurrencyCode,
 	) (*currency_helpers.CurrencyRate, error)
 	SetCurrencyLastRate(ctx context.Context, currencyRates *currency_helpers.CurrencyRates) error
+
+	GetTimestampRate(
+		ctx context.Context,
+		currencyCodeBase currency_helpers.CurrencyCode,
+		currencyCodeSecond currency_helpers.CurrencyCode,
+	) (*currency_helpers.CurrencyTimelineRate, error)
+	SaveTimestampRate(ctx context.Context, rate *currency_helpers.CurrencyTimelineRate) error
 }
 
 func InitCache(cfg *config.Config) (Cache, error) {
@@ -124,6 +131,55 @@ func (r *Redis) SetCurrencyLastRate(ctx context.Context, currencyRates *currency
 	}
 	count, err := r.rds.HSet(
 		ctx, currency_helpers.CurrentTimeRateCollection, currencyRates.Base.String(), string(data),
+	).Result()
+	if err != nil {
+		return errors.Wrap(err, "save currency last rate")
+	}
+
+	if count == 0 {
+		return errors.New("save no info")
+	}
+
+	return nil
+}
+
+func (r *Redis) GetTimestampRate(
+	ctx context.Context,
+	currencyCodeBase currency_helpers.CurrencyCode,
+	currencyCodeSecond currency_helpers.CurrencyCode,
+) (*currency_helpers.CurrencyTimelineRate, error) {
+	jsonData, err := r.rds.HGet(
+		ctx,
+		currency_helpers.TimeCollection,
+		fmt.Sprintf("%s:%s", currencyCodeBase.String(), currencyCodeSecond.String()),
+	).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+
+		return nil, errors.Wrap(err, "get timestamp rate error")
+	}
+
+	var result currency_helpers.CurrencyTimelineRate
+	err = json.Unmarshal([]byte(jsonData), &result)
+	if err != nil {
+		return nil, errors.Wrap(err, "parse timestamp rate data")
+	}
+
+	return &result, nil
+}
+
+func (r *Redis) SaveTimestampRate(ctx context.Context, rate *currency_helpers.CurrencyTimelineRate) error {
+	data, err := json.Marshal(rate)
+	if err != nil {
+		return errors.Wrap(err, "error in marshal data for redis")
+	}
+	count, err := r.rds.HSet(
+		ctx,
+		currency_helpers.TimeCollection,
+		fmt.Sprintf("%s:%s", rate.Base.String(), rate.Second.String()),
+		string(data),
 	).Result()
 	if err != nil {
 		return errors.Wrap(err, "save currency last rate")
