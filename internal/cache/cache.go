@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/go-redis/redis/v9"
 	"github.com/pkg/errors"
-	"time"
 	"wallet-service/internal/config"
 	"wallet-service/internal/currency_helpers"
 )
@@ -76,7 +75,7 @@ func (r *Redis) SetAvailableCurrencies(ctx context.Context, availableCurrencies 
 	if err != nil {
 		return errors.Wrap(err, "error in marshal data for redis")
 	}
-	saved, err := r.rds.Set(ctx, currency_helpers.AvailableCurrencies, string(data), time.Hour*24).Result()
+	saved, err := r.rds.Set(ctx, currency_helpers.AvailableCurrencies, string(data), 0).Result()
 	if err != nil {
 		return errors.Wrap(err, "save available currencies")
 	}
@@ -135,7 +134,7 @@ func (r *Redis) SetCurrencyLastRate(ctx context.Context, currencyRates *currency
 		ctx,
 		fmt.Sprintf("%s:%s", currency_helpers.CurrentTimeRateCollection, currencyRates.Base.String()),
 		string(data),
-		time.Hour*24,
+		0,
 	).Result()
 	if err != nil {
 		return errors.Wrap(err, "save currency last rate")
@@ -192,7 +191,7 @@ func (r *Redis) SaveTimestampRate(ctx context.Context, rate *currency_helpers.Cu
 			rate.Base.String(),
 			rate.Second.String()),
 		string(data),
-		time.Hour*48,
+		0,
 	).Result()
 	if err != nil {
 		return errors.Wrap(err, "save currency last rate")

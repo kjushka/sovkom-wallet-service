@@ -3,7 +3,7 @@ run:
 	docker push imigaka/wallet-service
 	docker compose build --no-cache
 	docker compose up -d
-	docker compose logs -f
+#	docker compose logs -f
 
 stop:
 	docker compose stop
