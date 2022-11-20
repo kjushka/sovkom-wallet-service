@@ -106,7 +106,9 @@ func (r *Redis) GetCurrencyLastRate(
 	currencyCodeBase currency_helpers.CurrencyCode,
 	currencyCodeSecond currency_helpers.CurrencyCode,
 ) (*currency_helpers.CurrencyRate, error) {
-	jsonData, err := r.rds.HGet(ctx, currency_helpers.CurrentTimeRateCollection, currencyCodeBase.String()).Result()
+	jsonData, err := r.rds.Get(
+		ctx, fmt.Sprintf("%s:%s", currency_helpers.CurrentTimeRateCollection, currencyCodeBase.String()),
+	).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, nil
@@ -129,14 +131,17 @@ func (r *Redis) SetCurrencyLastRate(ctx context.Context, currencyRates *currency
 	if err != nil {
 		return errors.Wrap(err, "error in marshal data for redis")
 	}
-	count, err := r.rds.HSet(
-		ctx, currency_helpers.CurrentTimeRateCollection, currencyRates.Base.String(), string(data),
+	status, err := r.rds.Set(
+		ctx,
+		fmt.Sprintf("%s:%s", currency_helpers.CurrentTimeRateCollection, currencyRates.Base.String()),
+		string(data),
+		time.Hour*24,
 	).Result()
 	if err != nil {
 		return errors.Wrap(err, "save currency last rate")
 	}
 
-	if count == 0 {
+	if status != "OK" {
 		return errors.New("save no info")
 	}
 
@@ -148,10 +153,14 @@ func (r *Redis) GetTimestampRate(
 	currencyCodeBase currency_helpers.CurrencyCode,
 	currencyCodeSecond currency_helpers.CurrencyCode,
 ) (*currency_helpers.CurrencyTimelineRate, error) {
-	jsonData, err := r.rds.HGet(
+	jsonData, err := r.rds.Get(
 		ctx,
-		currency_helpers.TimeCollection,
-		fmt.Sprintf("%s:%s", currencyCodeBase.String(), currencyCodeSecond.String()),
+		fmt.Sprintf(
+			"%s:%s:%s",
+			currency_helpers.TimeCollection,
+			currencyCodeBase.String(),
+			currencyCodeSecond.String(),
+		),
 	).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -175,17 +184,21 @@ func (r *Redis) SaveTimestampRate(ctx context.Context, rate *currency_helpers.Cu
 	if err != nil {
 		return errors.Wrap(err, "error in marshal data for redis")
 	}
-	count, err := r.rds.HSet(
+	status, err := r.rds.Set(
 		ctx,
-		currency_helpers.TimeCollection,
-		fmt.Sprintf("%s:%s", rate.Base.String(), rate.Second.String()),
+		fmt.Sprintf(
+			"%s:%s:%s",
+			currency_helpers.TimeCollection,
+			rate.Base.String(),
+			rate.Second.String()),
 		string(data),
+		time.Hour*48,
 	).Result()
 	if err != nil {
 		return errors.Wrap(err, "save currency last rate")
 	}
 
-	if count == 0 {
+	if status != "OK" {
 		return errors.New("save no info")
 	}
 
